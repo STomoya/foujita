@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -15,9 +14,7 @@ EXTS = {'.png', '.jpg', '.jpeg', '.bmp', '.webp'}
 
 
 def list_images(path: Path) -> list[Path]:
-    """Image files of a directory (sorted), a single image, or a `.txt` list (one path per line, relative to it)."""
-    if path.suffix == '.txt':
-        return [path.parent / line for line in path.read_text().split() if line]
+    """Sorted image files of a directory (or the file itself)."""
     if path.is_file():
         return [path]
     return sorted(p for p in path.rglob('*') if p.suffix.lower() in EXTS)
@@ -35,17 +32,6 @@ def load_image(path: Path, size: int) -> np.ndarray:
 def save_image(path: Path, canvas: np.ndarray) -> None:
     """Write an (H, W, 3) float canvas as png."""
     Image.fromarray((canvas.clip(0, 1) * 255).round().astype(np.uint8)).save(path)
-
-
-def write_sample_list(src: Path, out: Path, n: int, seed: int, subdirs: list[str] | None = None) -> None:
-    """Pick `n` images (seeded, sorted) from `src` (optionally only `src/<subdir>`s) and write a list file."""
-    roots = [src / d for d in subdirs] if subdirs else [src]
-    pool = sorted({p for r in roots for p in list_images(r)})
-    if len(pool) < n:
-        msg = f'only {len(pool)} images under {roots}, need {n}'
-        raise ValueError(msg)
-    picked = sorted(np.random.default_rng(seed).choice(len(pool), n, replace=False))
-    out.write_text(''.join(f'{os.path.relpath(pool[i], out.parent)}\n' for i in picked))
 
 
 def prepare_mnist(root: Path, out: Path, n: int) -> None:

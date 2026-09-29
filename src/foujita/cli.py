@@ -14,8 +14,9 @@ import numpy as np
 import yaml
 
 from foujita import metrics
-from foujita.data import list_images, load_image, prepare_mnist, save_image, write_sample_list
+from foujita.data import list_images, load_image, prepare_mnist, save_image
 from foujita.experiment import Run
+from foujita.hf import SOURCES, fetch
 from foujita.legacy import hertzmann
 from foujita.strokes import Strokes, blank_canvas, paint_stroke, render
 
@@ -128,6 +129,7 @@ def cmd_eval(args: argparse.Namespace) -> None:
 def main() -> None:
     """CLI entry point."""
     logging.basicConfig(level=logging.INFO, format='%(message)s')
+    logging.getLogger('httpx').setLevel(logging.WARNING)  # datasets/hub log every request at INFO
     ap = argparse.ArgumentParser(prog='foujita')
     sub = ap.add_subparsers(required=True)
     common = argparse.ArgumentParser(add_help=False)
@@ -148,7 +150,7 @@ def main() -> None:
 
     e = sub.add_parser('eval', parents=[common])
     e.add_argument('--run', type=Path, required=True, help='paint run directory to evaluate')
-    e.add_argument('--fid-ref', type=Path, help='reference images (folder or .txt list) for FID; skipped if absent')
+    e.add_argument('--fid-ref', type=Path, help='reference images (folder) for FID; skipped if absent')
     e.set_defaults(fn=cmd_eval)
 
     d = sub.add_parser('prepare', help='dataset preparation')
@@ -158,13 +160,17 @@ def main() -> None:
     m.add_argument('--out', type=Path, default=Path('data/mnist'))
     m.add_argument('-n', type=int, default=100)
     m.set_defaults(fn=lambda a: prepare_mnist(a.root, a.out, a.n))
-    s = dsub.add_parser('sample', help='seeded fixed-size sample of an image folder, written as a .txt list')
-    s.add_argument('--src', type=Path, required=True)
-    s.add_argument('--out', type=Path, required=True)
-    s.add_argument('-n', type=int, required=True)
-    s.add_argument('--seed', type=int, default=0)
-    s.add_argument('--subdirs', nargs='*', help='only these subfolders of --src (e.g. WikiArt styles)')
-    s.set_defaults(fn=lambda a: write_sample_list(a.src, a.out, a.n, a.seed, a.subdirs))
+    for name, src in SOURCES.items():
+        h = dsub.add_parser(name, help=f'stream {src.repo} and save a seeded random sample as png')
+        h.add_argument('--split', default=src.split)
+        h.add_argument('-n', type=int, default=src.n, help='number of images; 0 = all')
+        h.add_argument('--seed', type=int, default=0)
+        h.add_argument('--out', type=Path, default=None, help=f'default data/{src.out}')
+        if name == 'wikiart':
+            h.add_argument('--styles', nargs='*', help='WikiArt styles to keep (default: all)')
+        h.set_defaults(
+            fn=lambda a, name=name: fetch(name, a.split, a.n or None, a.seed, a.out, getattr(a, 'styles', None))
+        )
 
     args = ap.parse_args()
     args.fn(args)

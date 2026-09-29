@@ -7,7 +7,6 @@ from PIL import Image
 
 from foujita import metrics
 from foujita.cli import main
-from foujita.data import list_images
 from foujita.legacy.hertzmann import HertzmannParams, paint
 from foujita.strokes import Strokes, render
 
@@ -42,11 +41,6 @@ def test_cli_paint_then_eval(tmp_path, monkeypatch):
         monkeypatch.setattr('sys.argv', ['foujita', *a])
         main()
 
-    run_main('prepare', 'sample', '--src', inp, '--out', str(tmp_path / 'list.txt'), '-n', '3')
-    picked = list_images(tmp_path / 'list.txt')
-    assert len(picked) == 3
-    run_main('prepare', 'sample', '--src', inp, '--out', str(tmp_path / 'list2.txt'), '-n', '3')
-    assert picked == list_images(tmp_path / 'list2.txt')  # seeded, reproducible
     run_main('paint', 'hertzmann', '--input', inp, '--outputs', out, '--size', '64', '--step-images', 'a0')
     (run,) = (tmp_path / 'out' / 'hertzmann').iterdir()
     assert (run / 'strokes' / 'a0.npz').exists()
