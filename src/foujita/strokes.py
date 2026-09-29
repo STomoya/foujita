@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -32,16 +32,16 @@ class Strokes:
     def save(self, path: Path, **extra: float) -> None:
         """Write to npz. `extra` scalars (e.g. time_s) are stored alongside."""
         lens = np.array([len(p) for p in self.points])
-        np.savez_compressed(
-            path,
-            format=self.format,
-            canvas_size=np.array(self.canvas_size),
-            radius=np.array(self.radius, dtype=np.float32),
-            color=np.array(self.color, dtype=np.float32).reshape(-1, 3),
-            point_offsets=np.concatenate([[0], np.cumsum(lens)]),
-            points=np.concatenate(self.points).astype(np.float32) if self.points else np.zeros((0, 2), np.float32),
+        arrays: dict[str, Any] = {
+            'format': self.format,
+            'canvas_size': np.array(self.canvas_size),
+            'radius': np.array(self.radius, dtype=np.float32),
+            'color': np.array(self.color, dtype=np.float32).reshape(-1, 3),
+            'point_offsets': np.concatenate([[0], np.cumsum(lens)]),
+            'points': np.concatenate(self.points).astype(np.float32) if self.points else np.zeros((0, 2), np.float32),
             **extra,
-        )
+        }
+        np.savez_compressed(path, **arrays)
 
     @classmethod
     def load(cls, path: Path) -> tuple[Strokes, dict[str, float]]:
@@ -49,7 +49,7 @@ class Strokes:
         d = np.load(path)
         off, pts = d['point_offsets'], d['points']
         strokes = cls(
-            canvas_size=tuple(int(v) for v in d['canvas_size']),
+            canvas_size=(int(d['canvas_size'][0]), int(d['canvas_size'][1])),
             radius=d['radius'].tolist(),
             color=list(d['color']),
             points=[pts[a:b] for a, b in pairwise(off)],
