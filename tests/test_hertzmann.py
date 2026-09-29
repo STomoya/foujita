@@ -7,6 +7,7 @@ from PIL import Image
 
 from foujita import metrics
 from foujita.cli import main
+from foujita.data import list_images
 from foujita.legacy.hertzmann import HertzmannParams, paint
 from foujita.strokes import Strokes, render
 
@@ -33,29 +34,29 @@ def test_paint_reduces_error_and_roundtrips(tmp_path):
 
 def test_cli_paint_then_eval(tmp_path, monkeypatch):
     (tmp_path / 'in').mkdir()
-    Image.fromarray((_image() * 255).astype(np.uint8)).save(tmp_path / 'in' / 'a.png')
-    out = str(tmp_path / 'out')
-    run_main = lambda *a: (monkeypatch.setattr('sys.argv', ['foujita', *a]), main())  # noqa: E731
-    run_main(
-        'paint',
-        'hertzmann',
-        '--input',
-        str(tmp_path / 'in'),
-        '--outputs',
-        out,
-        '--size',
-        '64',
-        '--step-images',
-        'a',
-        '--step-every',
-        '20',
-    )
+    for k in range(4):
+        Image.fromarray((np.roll(_image(), 5 * k, axis=1) * 255).astype(np.uint8)).save(tmp_path / 'in' / f'a{k}.png')
+    out, inp = str(tmp_path / 'out'), str(tmp_path / 'in')
+
+    def run_main(*a):
+        monkeypatch.setattr('sys.argv', ['foujita', *a])
+        main()
+
+    run_main('prepare', 'sample', '--src', inp, '--out', str(tmp_path / 'list.txt'), '-n', '3')
+    picked = list_images(tmp_path / 'list.txt')
+    assert len(picked) == 3
+    run_main('prepare', 'sample', '--src', inp, '--out', str(tmp_path / 'list2.txt'), '-n', '3')
+    assert picked == list_images(tmp_path / 'list2.txt')  # seeded, reproducible
+    run_main('paint', 'hertzmann', '--input', inp, '--outputs', out, '--size', '64', '--step-images', 'a0')
     (run,) = (tmp_path / 'out' / 'hertzmann').iterdir()
-    assert (run / 'strokes' / 'a.npz').exists()
-    assert (run / 'canvases' / 'a.png').exists()
-    assert list((run / 'steps' / 'a').glob('*.png'))
+    assert (run / 'strokes' / 'a0.npz').exists()
+    assert (run / 'canvases' / 'a3.png').exists()
+    assert list((run / 'steps' / 'a0').glob('*.png'))
     assert 'status: done' in (run / 'config.yaml').read_text()
-    run_main('eval', '--input', str(tmp_path / 'in'), '--outputs', out, '--run', str(run), '--name', 'ev')
+    run_main('eval', '--input', inp, '--outputs', out, '--run', str(run), '--name', 'ev', '--fid-ref', inp)
     ev = next(p for p in (tmp_path / 'out' / 'hertzmann').iterdir() if p.name.endswith('_ev'))
     summary = json.loads((ev / 'summary.json').read_text())
     assert summary['psnr']['mean'] > 15
+    assert 0 <= summary['lpips']['mean'] < 1
+    assert summary['fid'] >= 0
+    assert len((ev / 'metrics_per_image.csv').read_text().splitlines()) == 5

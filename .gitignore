@@ -14,5 +14,6 @@ local/
 
 # Experiment outputs and test reports
 outputs/
+data/
 reports/
 .coverage

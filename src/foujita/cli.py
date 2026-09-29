@@ -14,7 +14,7 @@ import numpy as np
 import yaml
 
 from foujita import metrics
-from foujita.data import list_images, load_image, save_image
+from foujita.data import list_images, load_image, prepare_mnist, save_image, write_sample_list
 from foujita.experiment import Run
 from foujita.legacy import hertzmann
 from foujita.strokes import Strokes, blank_canvas, paint_stroke, render
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # method slug -> (params class, paint function). Add learned/legacy methods here.
 METHODS = {'hertzmann': (hertzmann.HertzmannParams, hertzmann.paint)}
-METRICS = ('mse', 'psnr', 'ssim', 'stroke_count', 'time_s')
+METRICS = ('mse', 'psnr', 'ssim', 'lpips', 'stroke_count', 'time_s')
 
 
 def cmd_paint(args: argparse.Namespace) -> None:
@@ -86,19 +86,22 @@ def cmd_eval(args: argparse.Namespace) -> None:
         'dataset': str(args.input),
         'size': size,
         'image_list': ids,
+        'fid_reference': str(args.fid_ref) if args.fid_ref else None,
     }
     with Run(args.outputs, method, args.name, config, args.seed) as run:
-        rows = []
+        rows, canvases = [], []
         for i in ids:
             target = load_image(images[i], size)
             strokes, extra = Strokes.load(args.run / 'strokes' / f'{i}.npz')
             canvas = render(strokes)
+            canvases.append(canvas)
             rows.append(
                 {
                     'image_id': i,
                     'mse': metrics.mse(canvas, target),
                     'psnr': metrics.psnr(canvas, target),
                     'ssim': metrics.ssim(canvas, target),
+                    'lpips': metrics.lpips_dist(canvas, target),
                     'stroke_count': len(strokes),
                     'time_s': extra['time_s'],
                 },
@@ -107,14 +110,18 @@ def cmd_eval(args: argparse.Namespace) -> None:
             w = csv.DictWriter(f, ['image_id', *METRICS])
             w.writeheader()
             w.writerows(rows)
-        summary = {
+        summary: dict[str, dict[str, float] | float] = {
             m: {'mean': float(np.mean([r[m] for r in rows])), 'std': float(np.std([r[m] for r in rows]))}
             for m in METRICS
         }
+        if args.fid_ref:
+            ref = [load_image(p, size) for p in list_images(args.fid_ref)]
+            summary['fid'] = metrics.fid(canvases, ref)  # ponytail: n < 2048 gives a noisy, rank-deficient estimate
         (run.dir / 'summary.json').write_text(json.dumps(summary, indent=2))
-        for m, s in summary.items():
-            run.tb.add_scalar(f'eval/{m}', s['mean'], 0)
-        logger.info('%s', {m: round(s['mean'], 4) for m, s in summary.items()})
+        flat = {m: v['mean'] if isinstance(v, dict) else v for m, v in summary.items()}
+        for m, v in flat.items():
+            run.tb.add_scalar(f'eval/{m}', v, 0)
+        logger.info('%s', {m: round(v, 4) for m, v in flat.items()})
     logger.info('run: %s', run.dir)
 
 
@@ -141,7 +148,23 @@ def main() -> None:
 
     e = sub.add_parser('eval', parents=[common])
     e.add_argument('--run', type=Path, required=True, help='paint run directory to evaluate')
+    e.add_argument('--fid-ref', type=Path, help='reference images (folder or .txt list) for FID; skipped if absent')
     e.set_defaults(fn=cmd_eval)
+
+    d = sub.add_parser('prepare', help='dataset preparation')
+    dsub = d.add_subparsers(required=True)
+    m = dsub.add_parser('mnist', help='download MNIST, write test digits as png')
+    m.add_argument('--root', type=Path, default=Path('data/raw'))
+    m.add_argument('--out', type=Path, default=Path('data/mnist'))
+    m.add_argument('-n', type=int, default=100)
+    m.set_defaults(fn=lambda a: prepare_mnist(a.root, a.out, a.n))
+    s = dsub.add_parser('sample', help='seeded fixed-size sample of an image folder, written as a .txt list')
+    s.add_argument('--src', type=Path, required=True)
+    s.add_argument('--out', type=Path, required=True)
+    s.add_argument('-n', type=int, required=True)
+    s.add_argument('--seed', type=int, default=0)
+    s.add_argument('--subdirs', nargs='*', help='only these subfolders of --src (e.g. WikiArt styles)')
+    s.set_defaults(fn=lambda a: write_sample_list(a.src, a.out, a.n, a.seed, a.subdirs))
 
     args = ap.parse_args()
     args.fn(args)
