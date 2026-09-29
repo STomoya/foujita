@@ -9,9 +9,15 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "numpy>=2.5.3",
+    "pillow>=12.3.0",
+    "pyyaml>=6.0.3",
+    "tensorboard>=2.21.0",
     "torch>=2.14.0",
     "torchvision>=0.29.0",
 ]
+
+[project.scripts]
+foujita = "foujita.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
@@ -34,6 +40,7 @@ quote-style = "single"
 indent-style = "space"
 
 [tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN", "D", "PLR2004", "S"]
 "__init__.py" = ["F401", "F403", "F405", "D"]
 
 [tool.ruff.lint]

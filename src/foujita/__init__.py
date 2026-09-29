@@ -1,2 +1,2 @@
 def hello() -> str:
-    return "Hello from paint!"
+    return 'Hello from paint!'
