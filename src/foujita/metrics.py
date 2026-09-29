@@ -51,24 +51,33 @@ def lpips_dist(a: np.ndarray, b: np.ndarray) -> float:
         return float(_lpips_net()(x, y))
 
 
-def _inception_stats(images: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+def _device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    return torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+
+
+@cache
+def _inception() -> torch.nn.Module:
     from pytorch_fid.inception import InceptionV3  # noqa: PLC0415
 
-    net = InceptionV3([InceptionV3.BLOCK_INDEX_BY_DIM[2048]]).eval()
-    feats = []
+    return InceptionV3([InceptionV3.BLOCK_INDEX_BY_DIM[2048]]).eval().to(_device())
+
+
+def inception_features(images: np.ndarray, batch: int = 50) -> np.ndarray:
+    """(N, H, W, 3) float images in [0, 1] -> (N, 2048) float64 pool features (pytorch-fid weights)."""
+    net, out = _inception(), []
     with torch.no_grad():
-        for i in range(0, len(images), 50):
-            batch = torch.from_numpy(np.stack(images[i : i + 50])).permute(0, 3, 1, 2)
-            feats.append(net(batch)[0].squeeze(-1).squeeze(-1).numpy())
-    f = np.concatenate(feats)
-    return f.mean(0), np.cov(f, rowvar=False)
+        for i in range(0, len(images), batch):
+            x = torch.from_numpy(images[i : i + batch]).permute(0, 3, 1, 2).to(_device())
+            out.append(net(x)[0].squeeze(-1).squeeze(-1).cpu().double().numpy())
+    return np.concatenate(out)
 
 
-def fid(generated: list[np.ndarray], reference: list[np.ndarray]) -> float:
-    """Frechet Inception Distance between two sets of (H, W, 3) images (pytorch-fid weights)."""
+def frechet_distance(m1: np.ndarray, s1: np.ndarray, m2: np.ndarray, s2: np.ndarray) -> float:
+    """Frechet distance between two Gaussians."""
     from scipy import linalg  # noqa: PLC0415
 
-    (m1, s1), (m2, s2) = _inception_stats(generated), _inception_stats(reference)
     # pytorch-fid's own helper breaks on current scipy (sqrtm `disp` arg removed), so it is inlined here.
     covmean = linalg.sqrtm(s1 @ s2)
     if not np.isfinite(covmean).all():  # singular product: add a small ridge, as pytorch-fid does
@@ -76,3 +85,9 @@ def fid(generated: list[np.ndarray], reference: list[np.ndarray]) -> float:
         covmean = linalg.sqrtm((s1 + eps) @ (s2 + eps))
     covmean = covmean.real
     return float((m1 - m2) @ (m1 - m2) + np.trace(s1) + np.trace(s2) - 2 * np.trace(covmean))
+
+
+def fid(generated: list[np.ndarray], ref_mean: np.ndarray, ref_cov: np.ndarray) -> float:
+    """FID of generated (H, W, 3) images against reference Inception statistics."""
+    f = inception_features(np.stack(generated))
+    return frechet_distance(f.mean(0), np.cov(f, rowvar=False), ref_mean, ref_cov)

@@ -6,6 +6,12 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -29,18 +35,10 @@ SOURCES = {
     'afhq-cat': Source('ryushinn/AFHQv2', 'test', 0, 'afhq-cat'),
     # Needs a Hugging Face token and accepting the terms on the dataset page.
     'imagenet': Source('ILSVRC/imagenet-1k', 'validation', 1000, 'imagenet-1k', gated=True),
-    'wikiart': Source('huggan/wikiart', 'train', 500, 'wikiart'),
 }
 
 
-def fetch(  # noqa: PLR0917
-    name: str,
-    split: str,
-    n: int | None,
-    seed: int,
-    out: Path | None,
-    styles: list[str] | None,
-) -> None:
+def fetch(name: str, split: str, n: int | None, seed: int, out: Path | None) -> None:
     """Save `n` random images (all if None) of `SOURCES[name]` to `out` (default `data/<out>/<split>`).
 
     # ponytail: streaming can't index rows, so "random" = seeded shuffle of shards plus a 1k-row buffer, then take n.
@@ -71,10 +69,6 @@ def fetch(  # noqa: PLR0917
         cat = feats['label'].str2int('cat')
         ds = ds.filter(lambda r: r['label'] == cat)
         filt = {'label': 'cat'}
-    if name == 'wikiart' and styles:
-        ids = {feats['style'].str2int(s) for s in styles}
-        ds = ds.filter(lambda r: r['style'] in ids)
-        filt = {'style': styles}
     if n:
         ds = ds.take(n)
     out.mkdir(parents=True, exist_ok=True)
@@ -85,3 +79,34 @@ def fetch(  # noqa: PLR0917
     manifest = {'repo': src.repo, 'split': split, 'n': count, 'seed': seed, 'buffer': SHUFFLE_BUFFER, 'filter': filt}
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     logger.info('saved %d images to %s', count, out)
+
+
+def prepare_wikiart_fid(sizes: list[int], out: Path, limit: int | None) -> None:
+    """Stream all of WikiArt and keep only per-style Inception statistics (`out/<size>/<Style>.npz`).
+
+    Images are never written to disk. FID only needs these statistics, and they merge exactly across styles.
+    # ponytail: no checkpointing, an interrupted pass restarts from scratch. Add per-shard partial saves if needed.
+    """
+    from datasets import load_dataset  # noqa: PLC0415
+
+    from foujita import fidstats  # noqa: PLC0415
+
+    ds = load_dataset('huggan/wikiart', split='train', streaming=True)
+    if ds.features is None:
+        msg = 'huggan/wikiart has no schema in streaming mode'
+        raise SystemExit(msg)
+    names = ds.features['style'].names
+
+    def rows() -> Iterator[tuple[str, Image.Image]]:
+        for i, r in enumerate(ds):
+            if limit and i >= limit:
+                return
+            if i % 1000 == 0:
+                logger.info('%d images', i)
+            yield names[r['style']], r['image']
+
+    result = fidstats.build(rows(), sizes)
+    for size, stats in result.items():
+        meta = {'repo': 'huggan/wikiart', 'split': 'train', 'size': size, 'limit': limit}
+        fidstats.save(out / str(size), stats, meta)
+        logger.info('size %d: %d styles, %d images -> %s', size, len(stats), sum(s[0] for s in stats.values()), out)

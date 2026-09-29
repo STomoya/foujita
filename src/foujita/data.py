@@ -22,7 +22,12 @@ def list_images(path: Path) -> list[Path]:
 
 def load_image(path: Path, size: int) -> np.ndarray:
     """Load as RGB, center-crop to square, resize to (size, size). Returns (H, W, 3) float32 in [0, 1]."""
-    img = Image.open(path).convert('RGB')
+    return square_resize(Image.open(path), size)
+
+
+def square_resize(img: Image.Image, size: int) -> np.ndarray:
+    """RGB, center-crop to square, resize to (size, size). Returns (H, W, 3) float32 in [0, 1]."""
+    img = img.convert('RGB')
     s = min(img.size)
     left, top = (img.width - s) // 2, (img.height - s) // 2
     img = img.crop((left, top, left + s, top + s)).resize((size, size), Image.Resampling.LANCZOS)

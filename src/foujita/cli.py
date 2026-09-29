@@ -16,7 +16,8 @@ import yaml
 from foujita import metrics
 from foujita.data import list_images, load_image, prepare_mnist, save_image
 from foujita.experiment import Run
-from foujita.hf import SOURCES, fetch
+from foujita.fidstats import load as load_fid_stats
+from foujita.hf import SOURCES, fetch, prepare_wikiart_fid
 from foujita.legacy import hertzmann
 from foujita.strokes import Strokes, blank_canvas, paint_stroke, render
 
@@ -87,7 +88,8 @@ def cmd_eval(args: argparse.Namespace) -> None:
         'dataset': str(args.input),
         'size': size,
         'image_list': ids,
-        'fid_reference': str(args.fid_ref) if args.fid_ref else None,
+        'fid_reference': str(args.fid_ref / str(size)) if args.fid_ref else None,
+        'fid_styles': args.fid_styles,
     }
     with Run(args.outputs, method, args.name, config, args.seed) as run:
         rows, canvases = [], []
@@ -116,8 +118,8 @@ def cmd_eval(args: argparse.Namespace) -> None:
             for m in METRICS
         }
         if args.fid_ref:
-            ref = [load_image(p, size) for p in list_images(args.fid_ref)]
-            summary['fid'] = metrics.fid(canvases, ref)  # ponytail: n < 2048 gives a noisy, rank-deficient estimate
+            ref_mean, ref_cov = load_fid_stats(args.fid_ref / str(size), args.fid_styles)
+            summary['fid'] = metrics.fid(canvases, ref_mean, ref_cov)  # ponytail: few canvases -> noisy, rank-deficient
         (run.dir / 'summary.json').write_text(json.dumps(summary, indent=2))
         flat = {m: v['mean'] if isinstance(v, dict) else v for m, v in summary.items()}
         for m, v in flat.items():
@@ -150,7 +152,10 @@ def main() -> None:
 
     e = sub.add_parser('eval', parents=[common])
     e.add_argument('--run', type=Path, required=True, help='paint run directory to evaluate')
-    e.add_argument('--fid-ref', type=Path, help='reference images (folder) for FID; skipped if absent')
+    e.add_argument(
+        '--fid-ref', type=Path, help='FID stats dir (prepare wikiart-fid), e.g. data/wikiart-fid; skipped if absent'
+    )
+    e.add_argument('--fid-styles', nargs='*', help='only these styles as FID reference (default: all)')
     e.set_defaults(fn=cmd_eval)
 
     d = sub.add_parser('prepare', help='dataset preparation')
@@ -166,11 +171,14 @@ def main() -> None:
         h.add_argument('-n', type=int, default=src.n, help='number of images; 0 = all')
         h.add_argument('--seed', type=int, default=0)
         h.add_argument('--out', type=Path, default=None, help=f'default data/{src.out}')
-        if name == 'wikiart':
-            h.add_argument('--styles', nargs='*', help='WikiArt styles to keep (default: all)')
-        h.set_defaults(
-            fn=lambda a, name=name: fetch(name, a.split, a.n or None, a.seed, a.out, getattr(a, 'styles', None))
-        )
+        h.set_defaults(fn=lambda a, name=name: fetch(name, a.split, a.n or None, a.seed, a.out))
+    w = dsub.add_parser(
+        'wikiart-fid', help='stream all of WikiArt, keep only per-style FID statistics (no images saved)'
+    )
+    w.add_argument('--sizes', type=int, nargs='+', default=[128], help='working resolutions to compute statistics for')
+    w.add_argument('--out', type=Path, default=Path('data/wikiart-fid'))
+    w.add_argument('--limit', type=int, default=None, help='only the first N images (for testing)')
+    w.set_defaults(fn=lambda a: prepare_wikiart_fid(a.sizes, a.out, a.limit))
 
     args = ap.parse_args()
     args.fn(args)
