@@ -31,3 +31,17 @@ Notes:
 - Parameters are untuned; this is the first baseline.
 - Strokes are round-capped polylines rather than B-splines.
 - No per-step canvases were saved.
+
+## Im2Oil (2022)
+
+Default parameters: density 0.1 strokes/pixel (1638 strokes at 128), texture weight 4, Lloyd iterations 5, stroke length
+2.0x and width 1.0x cell diameter, textured oil-brush strokes (`textured-brush-v1`). Image size 128, seed 0, device
+`mps`, LPIPS at 224, FID against all WikiArt styles. Run at commit `8f6f414`.
+
+| eval run | painted run | data | n | MSE | PSNR | SSIM | LPIPS@224 | strokes | time | FID |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `20260930-1819_base-afhq-cat-eval224` | `20260930-1818_base-afhq-cat` | AFHQv2 cat, official test | 493 | 0.0064 (0.0026) | 22.28 (1.70) | 0.576 (0.062) | 0.329 (0.048) | 1638 (0) | 0.13 (0.01) | 286.0 |
+| `20260930-1824_base-imagenet-1k-eval224` | `20260930-1821_base-imagenet-1k` | ImageNet val, seeded 1000 sample | 1000 | 0.0099 (0.0057) | 20.72 (2.52) | 0.538 (0.103) | 0.355 (0.083) | 1638 (0) | 0.12 (0.00) | 166.3 |
+
+Notes: parameters untuned; Hertzmann uses ~1.6x more strokes here, so the comparison is not stroke-matched. No per-step
+canvases were saved. Stroke count is fixed by `density` (std 0).

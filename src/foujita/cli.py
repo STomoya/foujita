@@ -9,6 +9,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import yaml
@@ -18,23 +19,29 @@ from foujita.data import list_images, load_image, prepare_mnist, save_image
 from foujita.experiment import Run
 from foujita.fidstats import load as load_fid_stats
 from foujita.hf import SOURCES, fetch, prepare_wikiart_fid
-from foujita.legacy import hertzmann
-from foujita.strokes import Strokes, blank_canvas, paint_stroke, render
+from foujita.legacy import hertzmann, im2oil
+from foujita.strokes import PAINTERS, Strokes, blank_canvas, render
 
 logger = logging.getLogger(__name__)
 
 # method slug -> (params class, paint function). Add learned/legacy methods here.
-METHODS = {'hertzmann': (hertzmann.HertzmannParams, hertzmann.paint)}
+METHODS: dict[str, tuple[Any, Any]] = {
+    'hertzmann': (hertzmann.HertzmannParams, hertzmann.paint),
+    'im2oil': (im2oil.Im2OilParams, im2oil.paint),
+}
 METRICS = ('mse', 'psnr', 'ssim', 'lpips', 'stroke_count', 'time_s')
 
 
 def cmd_paint(args: argparse.Namespace) -> None:
     """Paint every image of `--input`; save strokes, canvases and (for `--step-images`) per-step canvases."""
     params_cls, paint = METHODS[args.method]
-    params = params_cls(
-        **({'radii': tuple(args.radii)} if args.radii else {}),
-        **({'threshold': args.threshold} if args.threshold is not None else {}),
-    )
+    overrides: dict[str, Any] = {
+        'radii': tuple(args.radii) if args.radii else None,
+        'threshold': args.threshold,
+        'density': args.density,
+    }
+    fields = {f.name for f in dataclasses.fields(params_cls)}
+    params = params_cls(**{k: v for k, v in overrides.items() if v is not None and k in fields})
     paths = list_images(args.input)[: args.limit]
     config = {
         'kind': 'paint',
@@ -68,8 +75,9 @@ def cmd_paint(args: argparse.Namespace) -> None:
 def _save_steps(out: Path, strokes: Strokes, every: int) -> None:
     out.mkdir(parents=True)
     canvas = blank_canvas(strokes.canvas_size)
+    draw = PAINTERS[strokes.format]
     for i, (pts, r, c) in enumerate(zip(strokes.points, strokes.radius, strokes.color, strict=True), 1):
-        paint_stroke(canvas, pts, r, c)
+        draw(canvas, pts, r, c)
         if i % every == 0 or i == len(strokes):
             save_image(out / f'{i:06d}.png', canvas)
 
@@ -148,8 +156,9 @@ def main() -> None:
     p.add_argument('method', choices=METHODS)
     p.add_argument('--size', type=int, default=128)
     p.add_argument('--limit', type=int, default=None, help='only the first N images')
-    p.add_argument('--radii', type=float, nargs='+')
-    p.add_argument('--threshold', type=float)
+    p.add_argument('--radii', type=float, nargs='+', help='hertzmann')
+    p.add_argument('--threshold', type=float, help='hertzmann')
+    p.add_argument('--density', type=float, help='im2oil: strokes per pixel (fineness)')
     p.add_argument('--step-images', nargs='*', default=[], help='image ids that get per-step canvases')
     p.add_argument('--step-every', type=int, default=50, help='strokes between per-step canvases')
     p.set_defaults(fn=cmd_paint)
