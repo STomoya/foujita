@@ -11,3 +11,9 @@ wheels/
 
 # Local scratch / notes, not tracked
 local/
+
+# Experiment outputs and test reports
+outputs/
+data/
+reports/
+.coverage
