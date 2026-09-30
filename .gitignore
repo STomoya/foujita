@@ -17,3 +17,6 @@ outputs/
 data/
 reports/
 .coverage
+
+# Mac files
+.DS_Store
