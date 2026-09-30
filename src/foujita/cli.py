@@ -87,6 +87,7 @@ def cmd_eval(args: argparse.Namespace) -> None:
         'checkpoint': src.get('checkpoint'),
         'dataset': str(args.input),
         'size': size,
+        'lpips_size': args.lpips_size,
         'image_list': ids,
         'fid_reference': str(args.fid_ref / str(size)) if args.fid_ref else None,
         'fid_styles': args.fid_styles,
@@ -97,14 +98,17 @@ def cmd_eval(args: argparse.Namespace) -> None:
             target = load_image(images[i], size)
             strokes, extra = Strokes.load(args.run / 'strokes' / f'{i}.npz')
             canvas = render(strokes)
-            canvases.append(canvas)
+            canvases.append(canvas)  # painting size, for FID
             rows.append(
                 {
                     'image_id': i,
                     'mse': metrics.mse(canvas, target),
                     'psnr': metrics.psnr(canvas, target),
                     'ssim': metrics.ssim(canvas, target),
-                    'lpips': metrics.lpips_dist(canvas, target),
+                    'lpips': metrics.lpips_dist(
+                        render(strokes, size=args.lpips_size),
+                        load_image(images[i], args.lpips_size),
+                    ),
                     'stroke_count': len(strokes),
                     'time_s': extra['time_s'],
                 },
@@ -154,6 +158,9 @@ def main() -> None:
     e.add_argument('--run', type=Path, required=True, help='paint run directory to evaluate')
     e.add_argument(
         '--fid-ref', type=Path, help='FID stats dir (prepare wikiart-fid), e.g. data/wikiart-fid; skipped if absent'
+    )
+    e.add_argument(
+        '--lpips-size', type=int, default=224, help='LPIPS resolution (strokes re-rendered, target reloaded)'
     )
     e.add_argument('--fid-styles', nargs='*', help='only these styles as FID reference (default: all)')
     e.set_defaults(fn=cmd_eval)

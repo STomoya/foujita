@@ -81,9 +81,14 @@ def paint_stroke(canvas: np.ndarray, points: np.ndarray, radius: float, color: n
     canvas[y0:y1, x0:x1] = canvas[y0:y1, x0:x1] * (1 - alpha) + color * alpha
 
 
-def render(strokes: Strokes, upto: int | None = None) -> np.ndarray:
-    """Render the first `upto` strokes (all by default) on a blank canvas."""
-    canvas = blank_canvas(strokes.canvas_size)
+def render(strokes: Strokes, upto: int | None = None, size: int | None = None) -> np.ndarray:
+    """Render the first `upto` strokes (all by default) on a blank canvas.
+
+    With `size`, the vector strokes are scaled to a square `size` canvas (no upscaling blur).
+    """
+    h, w = strokes.canvas_size
+    sx, sy = (size / w, size / h) if size else (1.0, 1.0)
+    canvas = blank_canvas((size, size) if size else (h, w))
     for i in range(len(strokes) if upto is None else upto):
-        paint_stroke(canvas, strokes.points[i], strokes.radius[i], strokes.color[i])
+        paint_stroke(canvas, strokes.points[i] * [sx, sy], strokes.radius[i] * sx, strokes.color[i])
     return canvas

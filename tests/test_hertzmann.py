@@ -23,6 +23,8 @@ def test_paint_reduces_error_and_roundtrips(tmp_path):
     strokes = paint(img, HertzmannParams(), np.random.default_rng(0))
     canvas = render(strokes)
     assert len(strokes) > 0
+    assert np.allclose(render(strokes, size=64), canvas)
+    assert render(strokes, size=128).shape == (128, 128, 3)
     assert metrics.psnr(canvas, img) > metrics.psnr(np.ones_like(img), img) + 5
     assert metrics.ssim(img, img) > 0.999
     strokes.save(tmp_path / 's.npz', time_s=1.5)
